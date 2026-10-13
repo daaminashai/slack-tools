@@ -1,6 +1,6 @@
 # slack-tools
 
-Handy Slack tools for automation and bulk operations (e.g., sending mass DMs, etc.)
+Handy Slack tools for automation and bulk operations (e.g., sending mass DMs, posting to many channels, etc.)
 
 ## Setup
 
@@ -56,6 +56,14 @@ Add the following scopes to your Slack App in the **OAuth & Permissions** sectio
 - **`users:read`** - Read user information (optional, for validation)
 - **`users:read.email`** - Read user email addresses (optional)
 
+#### For Mass Channel Script (`scripts/mass_channel.py`)
+
+- **`chat:write`** - Post messages to channels
+- **`channels:read`** - Look up public channels by name/ID
+- **`groups:read`** - Look up private channels the bot is in (optional)
+- **`chat:write.public`** - Post to public channels without joining them (optional)
+- **`channels:join`** - Join public channels before posting, used by `--join` (optional)
+
 #### General Scopes (Recommended)
 
 - **`app_mentions:read`** - Read mentions of your app
@@ -82,7 +90,8 @@ slack-tools/
 ├── output/             # Script results and logs are saved here
 ├── scripts/            # All automation scripts
 │   ├── mass_dm.py      # Send mass DMs to users
-│   └── undo_dm.py      # Delete messages from a previous mass DM campaign
+│   ├── mass_channel.py # Post messages to multiple channels
+│   └── undo_dm.py      # Delete messages from a previous mass DM or channel campaign
 ├── .env                # API credentials (DO NOT commit)
 ├── .gitignore          # Ignore sensitive files
 ├── requirements.txt    # Python dependencies
@@ -221,11 +230,83 @@ To get a user's ID:
 - ✅ **Success/failure tracking for each message**
 - ✅ **Sent history** for reference and undo capability
 
+### Mass Channel Script (`scripts/mass_channel.py`)
+
+Post a message to multiple Slack channels, referenced by **channel ID** or **channel name**.
+
+#### Two Modes
+
+**Default Mode (Same message for all):**
+
+```json
+{
+  "message": "Hey everyone! 📢 Check out this *important update* <!here>",
+  "channels": ["C12345ABC", "#general", "random"]
+}
+```
+
+**Per-Channel Mode (Different message per channel, `--per-channel` flag):**
+
+```json
+[
+  { "channel": "C12345ABC", "message": "Hey team! *Important* update" },
+  { "channel": "#general", "message": "Hello general! 👋" }
+]
+```
+
+Channels can be IDs (`C12345ABC`), names with `#` (`#general`) or names without it (`general`). You can mix them in the same file.
+
+#### Usage
+
+1. **Create `input/channels.json`** in one of the formats above
+
+2. **Run the script:**
+
+   ```bash
+   # Default mode (same message)
+   python scripts/mass_channel.py
+
+   # Per-channel mode (different messages)
+   python scripts/mass_channel.py --per-channel
+
+   # Use a different input file
+   python scripts/mass_channel.py input/announcement.json
+
+   # Have the bot join public channels it isn't in
+   python scripts/mass_channel.py --join
+   ```
+
+3. **Confirm twice:** The script resolves every channel and shows:
+   - The message(s) to be sent
+   - Each channel as `#name (ID)` with member count, and whether it's private or the bot isn't in it
+   - The total reach across all channels
+   - Any channels that will be **skipped** (not found, archived, missing message)
+
+4. **Get your Sent ID** and check `output/`, same as the mass DM script
+
+#### Undo
+
+Channel campaigns are saved to the same history as DMs, so the same undo script works:
+
+```bash
+python scripts/undo_dm.py <sent_id>
+```
+
+Undo deletes the messages but does **not** leave channels the bot joined with `--join` (they're listed in the summary file).
+
+#### Notes
+
+- Names are looked up by paging through the workspace's channel list, which can take a little while in large workspaces. IDs are faster.
+- Private channels can only be posted to if the bot is already a member.
+- Duplicate channels (e.g. the same channel by name and by ID) are only sent once in default mode.
+- Rate limits are handled automatically (the script waits and retries).
+- Use `<!here>` or `<!channel>` in the message to ping a channel.
+
 ## Tips & Best Practices
 
 - Always test with a small batch before running mass operations
 - Check the `output/` folder after running scripts to verify results
-- User IDs are required; usernames will not work
+- User IDs are required for DMs; usernames will not work (channel names *do* work for the channel script)
 - Messages support full Slack markdown syntax
 - Keep `.env` file secure and never commit it to version control
 

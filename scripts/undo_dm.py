@@ -2,7 +2,8 @@
 """
 Undo Mass DM Script
 
-Deletes all messages sent in a previous mass DM campaign using the sent ID.
+Deletes all messages sent in a previous mass DM campaign (scripts/mass_dm.py)
+or mass channel campaign (scripts/mass_channel.py) using the sent ID.
 
 Usage:
     python scripts/undo_dm.py <sent_id>
@@ -58,23 +59,32 @@ def get_sent_history(sent_id: str) -> Optional[Dict]:
     return sent_batch
 
 
-def delete_message(channel_id: str, ts: str, user_id: str) -> bool:
+def describe_target(result: Dict) -> str:
+    """Label for who a message was sent to: a user ID for DMs, #name for channel posts."""
+    if result.get("user_id"):
+        return result["user_id"]
+    if result.get("channel_name"):
+        return f"#{result['channel_name']}"
+    return str(result.get("channel_id") or result.get("channel"))
+
+
+def delete_message(channel_id: str, ts: str, target: str) -> bool:
     """Delete a single message from a channel."""
     try:
         client.chat_delete(channel=channel_id, ts=ts)
-        print(f"  ✓ Deleted message to {user_id}")
+        print(f"  ✓ Deleted message to {target}")
         return True
     except SlackApiError as e:
         error_code = e.response.get("error", "unknown")
         # Some errors are expected (message already deleted, etc.)
         if error_code in ["message_not_found", "cant_delete_message"]:
-            print(f"  ⚠ {user_id} - Message already deleted or cannot be deleted")
+            print(f"  ⚠ {target} - Message already deleted or cannot be deleted")
             return True
         else:
-            print(f"  ✗ Failed to delete message for {user_id}: {error_code}")
+            print(f"  ✗ Failed to delete message for {target}: {error_code}")
             return False
     except Exception as e:
-        print(f"  ✗ Error deleting message for {user_id}: {e}")
+        print(f"  ✗ Error deleting message for {target}: {e}")
         return False
 
 
@@ -84,6 +94,7 @@ def confirm_undo(sent_batch: Dict, sent_id: str) -> bool:
     print("UNDO CONFIRMATION")
     print("=" * 70)
     print(f"\nSent ID: {sent_id}")
+    print(f"Type: {'channel messages' if sent_batch.get('type') == 'channel' else 'direct messages'}")
     print(f"Timestamp: {sent_batch['timestamp']}")
     print(f"Total messages: {sent_batch['total']}")
     print(f"Successful: {sent_batch['successful']}")
@@ -143,21 +154,22 @@ def main():
     print(f"Deleting {len(results)} messages...\n")
     
     for result in results:
+        target = describe_target(result)
+        
         if not result.get("success"):
-            print(f"  ⊘ Skipping {result['user_id']} (message send failed)")
+            print(f"  ⊘ Skipping {target} (message send failed)")
             skipped_count += 1
             continue
         
         channel_id = result.get("channel_id")
         ts = result.get("ts")
-        user_id = result.get("user_id")
         
         if not channel_id or not ts:
-            print(f"  ⊘ Skipping {user_id} (missing channel or timestamp)")
+            print(f"  ⊘ Skipping {target} (missing channel or timestamp)")
             skipped_count += 1
             continue
         
-        if delete_message(channel_id, ts, user_id):
+        if delete_message(channel_id, ts, target):
             deleted_count += 1
         else:
             failed_count += 1
