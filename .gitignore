@@ -45,6 +45,7 @@ env/
 /output/*.json
 /output/*.txt
 /input/recipients.json
+/input/channels.json
 /input/*.csv
 *.log
 
