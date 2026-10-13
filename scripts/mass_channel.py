@@ -129,10 +129,11 @@ def fetch_channels_by_name(names: Set[str]) -> Dict[str, Dict]:
                 cursor=cursor
             )
         except SlackApiError as e:
-            # Without groups:read we can still look up public channels
-            if e.response["error"] == "missing_scope" and types != "public_channel":
-                print("⚠ Missing groups:read scope - only public channels can be looked up by name")
-                types = "public_channel"
+            # Missing channels:read or groups:read: fall back to the channel type we can still list
+            needed = e.response.get("needed")
+            if e.response["error"] == "missing_scope" and "," in types and needed in ("channels:read", "groups:read"):
+                types = "private_channel" if needed == "channels:read" else "public_channel"
+                print(f"⚠ Missing {needed} scope - only {types.replace('_', ' ')}s can be looked up by name")
                 cursor = None
                 continue
             raise
@@ -153,11 +154,19 @@ def fetch_channels_by_name(names: Set[str]) -> Dict[str, Dict]:
 
 
 def fetch_channel_by_id(channel_id: str) -> Tuple[Optional[Dict], Optional[str]]:
-    """Get a channel's info by ID. Returns (channel, error)."""
+    """
+    Get a channel's info by ID. Returns (channel, error).
+
+    If the app lacks the scope to look the channel up (e.g. channels:read for a
+    public channel), returns a bare channel marked "unverified" - posting only
+    needs chat:write, so it's still worth trying.
+    """
     try:
         response = client.conversations_info(channel=channel_id, include_num_members=True)
         return response["channel"], None
     except SlackApiError as e:
+        if e.response["error"] == "missing_scope":
+            return {"id": channel_id, "unverified": f"app is missing {e.response.get('needed')} scope"}, None
         return None, f"Slack API Error: {e.response['error']}"
     except Exception as e:
         return None, f"Error: {str(e)}"
@@ -168,7 +177,8 @@ def resolve_targets(targets: List[Dict]) -> List[Dict]:
     Resolve every target's channel (ID or name) to an actual Slack channel.
 
     Each returned target has: channel, message, channel_id, channel_name,
-    is_member, is_private, num_members, and error (set if it can't be sent).
+    is_member, is_private, num_members, unverified (why it couldn't be looked up),
+    and error (set if it can't be sent).
     """
     resolved = []
     names = set()
@@ -184,6 +194,7 @@ def resolve_targets(targets: List[Dict]) -> List[Dict]:
             "is_member": False,
             "is_private": False,
             "num_members": None,
+            "unverified": None,
             "error": None
         })
         if channel_name:
@@ -221,6 +232,7 @@ def resolve_targets(targets: List[Dict]) -> List[Dict]:
         target["is_member"] = channel.get("is_member", False)
         target["is_private"] = channel.get("is_private", False)
         target["num_members"] = channel.get("num_members")
+        target["unverified"] = channel.get("unverified")
 
     return resolved
 
@@ -259,7 +271,8 @@ def confirm_action(targets: List[Dict], common_message: Optional[str] = None, au
     """
     ready = [t for t in targets if not t["error"]]
     skipped = [t for t in targets if t["error"]]
-    not_member = [t for t in ready if not t["is_member"]]
+    not_member = [t for t in ready if not t["is_member"] and not t["unverified"]]
+    unverified = [t for t in ready if t["unverified"]]
 
     print("\n" + "=" * 70)
     print("SEND CONFIRMATION SUMMARY")
@@ -277,7 +290,9 @@ def confirm_action(targets: List[Dict], common_message: Optional[str] = None, au
             details.append(f"{target['num_members']:,} members")
         if target["is_private"]:
             details.append("private")
-        if not target["is_member"]:
+        if target["unverified"]:
+            details.append(f"couldn't look up: {target['unverified']}")
+        elif not target["is_member"]:
             details.append("bot not in channel")
         suffix = f" [{', '.join(details)}]" if details else ""
         print(f"  • {format_channel(target)}{suffix}")
@@ -292,6 +307,10 @@ def confirm_action(targets: List[Dict], common_message: Optional[str] = None, au
         print(f"\n⚠️  Will be SKIPPED ({len(skipped)}):")
         for target in skipped:
             print(f"  • {target['channel']}: {target['error']}")
+
+    if unverified:
+        print(f"\nℹ️  {len(unverified)} channel(s) couldn't be looked up, so their name, size and whether the bot")
+        print("   is in them are unknown. Sending will still be attempted and fails where the bot isn't a member.")
 
     if not_member:
         if auto_join:
