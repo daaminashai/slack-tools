@@ -20,6 +20,7 @@ from typing import Optional, Dict
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 # Load environment variables
 load_dotenv()
@@ -32,6 +33,8 @@ if not SLACK_BOT_TOKEN:
     raise ValueError("SLACK_BOT_TOKEN not found in .env file")
 
 client = WebClient(token=SLACK_BOT_TOKEN)
+# Wait and retry automatically when Slack rate limits us
+client.retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=5))
 
 
 def get_sent_history(sent_id: str) -> Optional[Dict]:
