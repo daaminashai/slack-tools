@@ -14,7 +14,7 @@ Modes:
   - Per-channel (different messages): Array of objects with channel + message (use --per-channel flag)
 
 Usage:
-    python scripts/mass_channel.py [input_file] [--per-channel] [--join]
+    python scripts/mass_channel.py [input_file] [--per-channel] [--join] [--no-unfurl]
 """
 
 import os
@@ -339,15 +339,18 @@ def confirm_action(targets: List[Dict], common_message: Optional[str] = None, au
     return True
 
 
-def post_message(channel_id: str, message: str):
+def post_message(channel_id: str, message: str, unfurl: bool = True):
+    # Only override Slack's default unfurling when previews are turned off
+    unfurl_options = {} if unfurl else {"unfurl_links": False, "unfurl_media": False}
     return client.chat_postMessage(
         channel=channel_id,
         text=message,
-        mrkdwn=True  # Enable Slack markdown rendering
+        mrkdwn=True,  # Enable Slack markdown rendering
+        **unfurl_options
     )
 
 
-def send_channel_message(target: Dict, auto_join: bool = False) -> Dict[str, any]:
+def send_channel_message(target: Dict, auto_join: bool = False, unfurl: bool = True) -> Dict[str, any]:
     """
     Post a message to a resolved channel.
 
@@ -375,14 +378,14 @@ def send_channel_message(target: Dict, auto_join: bool = False) -> Dict[str, any
 
     try:
         try:
-            response = post_message(target["channel_id"], target["message"])
+            response = post_message(target["channel_id"], target["message"], unfurl)
         except SlackApiError as e:
             if e.response["error"] != "not_in_channel" or not auto_join or target["is_private"]:
                 raise
             client.conversations_join(channel=target["channel_id"])
             result["joined"] = True
             print(f"  ↪ Joined {label}")
-            response = post_message(target["channel_id"], target["message"])
+            response = post_message(target["channel_id"], target["message"], unfurl)
 
         result["success"] = True
         result["ts"] = response["ts"]
@@ -481,6 +484,11 @@ def main():
         action="store_true",
         help="Join public channels the bot isn't in before posting (requires channels:join scope)"
     )
+    parser.add_argument(
+        "--no-unfurl",
+        action="store_true",
+        help="Don't show link previews for links in the message"
+    )
     args = parser.parse_args()
 
     if not args.input_file.exists():
@@ -540,7 +548,7 @@ def main():
                 })
                 continue
 
-            result = send_channel_message(target, auto_join=args.join)
+            result = send_channel_message(target, auto_join=args.join, unfurl=not args.no_unfurl)
             results.append(result)
 
         # Save results
