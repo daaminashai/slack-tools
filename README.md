@@ -274,6 +274,9 @@ Channels can be IDs (`C12345ABC`), names with `#` (`#general`) or names without 
 
    # Have the bot join public channels it isn't in
    python scripts/mass_channel.py --join
+
+   # Don't show link previews for links in the message
+   python scripts/mass_channel.py --no-unfurl
    ```
 
 3. **Confirm twice:** The script resolves every channel and shows:
